@@ -9,6 +9,16 @@ pacman::p_load(
   install = FALSE
 )
 
+# Variables to Collect
+#   - Deaths (UCDP Georeferenced Events Dataset)
+#   - UN PKOs (Geocoded Peacekeeping Operations)
+#   - War Duration (UCDP Armed Conflict Dataset)
+#   - Economic Development (Anders et al. 2020)
+#   - Number of Military Interventions (UCDP External Support Dataset)
+#   - Type of Conflict (UCDP Georeferenced Events Dataset)
+#   - Government Military Strength (Correlates of War)
+#   - Rebel Military Strength (UCDP Non-State Actor Dataset)
+
 # Create a Country-Year Data Set (Gleditsch-Ward Codes)
 states <- create_stateyears(system = "gw", subset_years = c(1946:2023)) %>%
   # Add the COW Code Identifier to Cases Where GW Codes Do Not Align with COW Codes
@@ -35,6 +45,9 @@ states <- create_stateyears(system = "gw", subset_years = c(1946:2023)) %>%
   rename(
     "lgdppc" = "wbgdppc2011est"
   )
+
+# Load and Clean UCDP GED Data
+ged <- read.csv("Data/")
 
 # Load and Clean UCDP Battle-Related Deaths Data
 battle_deaths <- read.csv("Data/BattleDeaths_v24_1_conf.csv")
@@ -77,7 +90,7 @@ external <- external %>%
   # Only Look at Civil Wars
   filter(civil == 1) %>%
   # Only Look at External State Support
-  filter(ext_sup_s == 1) %>%
+  filter(ext_sup_s == 1 & actor_nonstate == 0) %>%
   # Only Look at Military Troop Support
   filter(ext_x_s == 1 | ext_p_s == 1) %>% 
   # Select Variables of Interest
@@ -100,7 +113,9 @@ external <- external %>%
     any_external_troops = ifelse(external_troop_presence == 1 | external_unclear_troop_presence == 1, 1, 0),
     any_count_troops_external_actors = external_troop_count + external_unclear_troop_count
   ) %>%
-  select(gwcode, year, any_external_troops, any_count_troops_external_actors)
+  select(gwcode, year, any_external_troops, any_count_troops_external_actors) %>%
+  # Create a Log-Transformation of the Count Variable
+  mutate(log_actor_count = log(any_count_troops_external_actors))
 
 # Load and Clean Geo-PKO Data
 geo_pko <- read_excel("Data/geo_pko_v.2.1.xlsx")
@@ -116,7 +131,7 @@ geo_pko <- geo_pko %>%
     un_troops = as.numeric(max(no.troops, na.rm = TRUE))
   ) %>%
   ungroup() %>%
-  mutate(un_pko = ifelse(un_troops > 0, 1, 0)) %>%
+  mutate(un_pko = ifelse(un_troops > 0, 1, 0))
 
 # Merge Data Sets
 final <- left_join(states, battle_deaths, by = c("gwcode", "year")) %>%
