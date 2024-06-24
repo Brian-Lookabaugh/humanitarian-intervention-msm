@@ -7,7 +7,7 @@ pacman::p_load(
   "peacesciencer", # Conflict Data Sets
   "readxl", # Reading Excel Files
   install = FALSE
-)
+) 
 
 # Variables to Collect
 #   - Deaths (UCDP Georeferenced Events Dataset)
