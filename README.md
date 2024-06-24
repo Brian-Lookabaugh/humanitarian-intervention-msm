@@ -1,1 +1,1 @@
-# Repo for "The Immediate and Delayed Pacifying Effects of Humanitarian Intervention: A Dynamic Causal Inference Approach"
+# Repo for "The Immediate and Delayed Effects of Armed Humanitarian Intervention: A Dynamic Causal Inference Approach"
