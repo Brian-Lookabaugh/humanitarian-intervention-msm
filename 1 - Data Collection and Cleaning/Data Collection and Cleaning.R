@@ -7,17 +7,15 @@ pacman::p_load(
   "peacesciencer", # Conflict Data Sets
   "readxl", # Reading Excel Files
   install = FALSE
-) 
+)
 
 # Variables to Collect
-#   - Deaths (UCDP Georeferenced Events Dataset)
-#   - UN PKOs (Geocoded Peacekeeping Operations)
+#   - Deaths (UCDP Georeferenced Events Dataset) 
+#   - UN PKOs (Kathman 2013)
 #   - War Duration (UCDP Armed Conflict Dataset)
 #   - Economic Development (Anders et al. 2020)
 #   - Number of Military Interventions (UCDP External Support Dataset)
-#   - Type of Conflict (UCDP Georeferenced Events Dataset)
-#   - Government Military Strength (Correlates of War)
-#   - Rebel Military Strength (UCDP Non-State Actor Dataset)
+#   - Government Military Strength (Correlates of War) 
 
 # Create a Country-Year Data Set (Gleditsch-Ward Codes)
 states <- create_stateyears(system = "gw", subset_years = c(1946:2023)) %>%
@@ -25,63 +23,62 @@ states <- create_stateyears(system = "gw", subset_years = c(1946:2023)) %>%
   add_ccode_to_gw() %>%
   # Add Government Military Capacity
   add_nmc() %>%
-  # Add Peace Years to Determine Spells of Conflict and Peace
-  add_spells() %>%
   # Add GDP Data
   add_sdp_gdp() %>%
   # Add Civil War Data
   add_ucdp_acd(type = "intrastate") %>%
-  # Keep Selected Variables
-  select(-c(milex, irst, pec, upop, cinc, wbgdp2011est, wbpopest, sdpest)) %>%
   # Create Conflict Duration Variable (When Conflict Starts, the Counter Starts at "1")
   group_by(gwcode) %>%
   mutate(duration = ifelse(ucdpongoing == 1, 
                            cumsum(ucdpongoing) - cumsum(lag(ucdpongoing, default = 0) == 0 & ucdpongoing == 1) + 1, 0)) %>%
   ungroup() %>%
   # Create Variable Transformations
-  mutate(lpop = log(tpop),
-         lmilper = ifelse(milper < 1, log(milper + 1), log(milper))) %>%
+  mutate(lmilper = log(milper + 1)) %>%
   # Rename Variables
   rename(
     "lgdppc" = "wbgdppc2011est"
-  )
+  ) %>%
+  # Filter Only Conflict and Post-Conflict Cases
+  group_by(gwcode) %>%
+  mutate(ever_conflict = ifelse(cumsum(duration == 1) >= 1, 1, 0)) %>%
+  ungroup() %>%
+  filter(ever_conflict == 1) %>%
+  # Keep Selected Variables
+  select(gwcode, ccode, statename, year, lgdppc, lmilper, duration)
 
 # Load and Clean UCDP GED Data
-ged <- read.csv("Data/")
+ged <- read.csv("Data/GEDEvent_v24_1.csv")
 
-# Load and Clean UCDP Battle-Related Deaths Data
-battle_deaths <- read.csv("Data/BattleDeaths_v24_1_conf.csv")
-
-battle_deaths <- battle_deaths %>%
-  # Only Look at Civil Wars
-  filter(type_of_conflict >= 3) %>%
-  # Select Variables of Interest
-  select(gwno_a, year, incompatibility, bd_best) %>%
+ged <- ged %>%
+  # Filter for Civil Conflicts
+  filter(is.na(gwnob)) %>%
+  # Create Government, Rebel, and Civilian Deaths Counts
+  mutate(gwcode = as.numeric(gwnoa)) %>%
+  mutate(
+    gov_deaths = ifelse(startsWith(side_a, "Government"), deaths_a, 0),
+    reb_deaths = case_when(
+      type_of_violence == 1 ~ deaths_b,
+      type_of_violence == 2 ~ deaths_a + deaths_b,
+      type_of_violence == 3 & !startsWith(side_a, "Government") ~ deaths_a,
+      TRUE ~ 0
+    )
+  ) %>%
   # Collapse to the Country-Year Level
-  group_by(gwno_a, year) %>%
+  group_by(gwcode, year) %>%
   summarise(
-    incompatibility = max(incompatibility),
-    bd_best = max(bd_best)
+    gov_deaths = sum(gov_deaths),
+    reb_deaths = sum(reb_deaths),
+    civ_deaths = sum(deaths_civilians),
+    overall_deaths = sum(best)
   ) %>%
-  ungroup() %>%
-  # Create a Conflict Over the Government Dummy
-  mutate(gov_conflict = ifelse(incompatibility >= 2, 1, 0)) %>%
-  select(-incompatibility) %>%
-  # Create a Lag Deaths Variable
-  arrange(gwno_a, year) %>%
-  group_by(gwno_a) %>%
-  mutate(lag_battle_deaths = lag(bd_best, n=1),
-         lag_year = lag(year, n = 1),
-         # Replace Values with NA If the Prior Year Observation Is More Than 1 Year Apart
-         lag_battle_deaths = ifelse(year - lag_year > 1, NA, lag_battle_deaths)) %>%
-  select(-lag_year) %>%
-  ungroup() %>%
-  # Rename These Variables
-  rename(
-    "gwcode" = "gwno_a",
-    "battle_deaths" = "bd_best"
+  # Create Lagged Deaths Variable
+  mutate(
+    lag_gov_deaths = lag(gov_deaths, n = 1),
+    lag_reb_deaths = lag(reb_deaths, n = 1),
+    lag_civ_deaths = lag(civ_deaths, n = 1),
+    lag_overall_deaths = lag(overall_deaths, n = 1)
   ) %>%
-  mutate(gwcode = as.numeric(gwcode))
+  ungroup()
 
 # Load and Clean UCDP External Support Data Set
 external <- read_excel("Data/ucdp-esd-ay-181.xlsx")
@@ -118,46 +115,45 @@ external <- external %>%
   mutate(log_actor_count = log(any_count_troops_external_actors))
 
 # Load and Clean Geo-PKO Data
-geo_pko <- read_excel("Data/geo_pko_v.2.1.xlsx")
+pkos <- read_excel("Data/mission-month_12-2019_kathman.xlsx")
 
-geo_pko <- geo_pko %>%
-  # Replace "Unknown" for UN Troops Count with NAs
-  mutate(no.troops = ifelse(no.troops == "unknown", NA, no.troops)) %>%
-  # Collapse to Country-Year Level
-  mutate(gwcode = as.numeric(gnwo),
-         no.tropps = as.numeric(no.troops)) %>%
-  group_by(gwcode, year) %>%
+pkos <- pkos %>%
+  # Replace Negative Values with NA
+  mutate(troop = ifelse(troop == -999, NA, troop),
+         police = ifelse(police == -999, NA, police),
+         ccode = ifelse(missionccode == -999, NA, missionccode)) %>%
+  # Collapse to the Country-Year Level
+  group_by(ccode, year) %>%
   summarise(
-    un_troops = as.numeric(max(no.troops, na.rm = TRUE))
+    troop = sum(troop),
+    police = sum(police)
   ) %>%
-  ungroup() %>%
-  mutate(un_pko = ifelse(un_troops > 0, 1, 0))
+  ungroup() 
 
 # Merge Data Sets
-final <- left_join(states, battle_deaths, by = c("gwcode", "year")) %>%
+final <- left_join(states, ged, by = c("gwcode", "year")) %>%
   left_join(external, by = c("gwcode", "year")) %>%
-  left_join(geo_pko, by = c("gwcode", "year"))
+  left_join(pkos, by = c("ccode", "year"))
 
-# Clean Merged Data Set
+# Clean Merged Data Set 
 final <- final %>%
-  # Remove All Observations with NA for the Outcome (Violence)
-  filter(!is.na(battle_deaths)) %>%
   # Replace NA Values for Merged In Data with "0"
   mutate(
     any_external_troops = ifelse(is.na(any_external_troops), 0, any_external_troops),
     any_count_troops_external_actors = ifelse(is.na(any_count_troops_external_actors), 0, any_count_troops_external_actors),
-    un_troops = ifelse(is.na(un_troops), 0, un_troops),
-    un_pko = ifelse(is.na(un_pko), 0, un_pko)
+    troop = ifelse(is.na(troop), 0, troop),
+    police = ifelse(is.na(police), 0, police)
   ) %>%
   # Filter the United States
   filter(gwcode != 2) %>%
-  # Create Conflict IDs for Each Conflict Spell (Remove the Old ID)
-  select(-conflict_ids) %>%
+  # Create Conflict IDs for Each Conflict Spell
   group_by(gwcode) %>%
   mutate(
     new_conflict = ifelse(year - lag(year, default = first(year) - 1) > 1, 1, 0),
     conflict_id = cumsum(new_conflict) + gwcode) %>%
-  ungroup()
+  ungroup() %>%
+  # Filter Pre-1990 Observations
+  filter(year >= 1990)
 
 # Inspect Elements of Merged Data Set
 summary(final)

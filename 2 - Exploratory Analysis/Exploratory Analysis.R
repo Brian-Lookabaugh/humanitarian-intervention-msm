@@ -5,16 +5,18 @@
 pacman::p_load(
   "ggplot2", # Data Visualization
   "panelView", # Panel Data Visualization
-  install = FALSE
-) 
+  install = FALSE 
+)
 
-# Plot Treatment Assignment (Binary)
-treat_assign_bin <- panelview(battle_deaths ~ un_pko + duration + lpop + lmilper + gov_conflict + 
-                               lag_battle_deaths + lgdppc + log_actor_count, data = final,
-                             index = c("statename", "year"))
+# Plot Treatment Assignment (Troops) - For Personal Inspection
+treat_assign_troops_gov <- panelview(gov_deaths ~ troop + duration + lmilper + 
+                                       lag_gov_deaths + lgdppc + log_actor_count, data = final,
+                                     index = c("conflict_id", "year"))
 
-# Plot Treatment Assignment (Continuous)
-
+# Plot Treatment Assignment (Police) - For Personal Inspection
+treat_assign_police_gov <- panelview(gov_deaths ~ police + duration + lmilper + 
+                                       lag_gov_deaths + lgdppc + log_actor_count, data = final,
+                                     index = c("conflict_id", "year"))
 # Map of UN Troops
 
 # Map of UN Police
